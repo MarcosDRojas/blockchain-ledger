@@ -50,4 +50,34 @@ public class BlockTests
 
         Assert.NotEqual(block1.Hash, block2.Hash);
     }
+
+    [Fact]
+    public void Constructor_StartsWithNonceZero()
+    {
+        var block = new Block(0, "Genesis Block", "0");
+
+        Assert.Equal(0, block.Nonce);
+    }
+
+    [Fact]
+    public void MineBlock_ProducesHashWithRequiredLeadingZeros()
+    {
+        var block = new Block(0, "Genesis Block", "0");
+
+        block.MineBlock(difficulty: 2);
+
+        Assert.StartsWith("00", block.Hash);
+    }
+
+    [Fact]
+    public void MineBlock_ChangesNonceFromInitialHash()
+    {
+        var block = new Block(0, "Genesis Block", "0");
+        string hashBeforeMining = block.Hash;
+
+        block.MineBlock(difficulty: 2);
+
+        Assert.NotEqual(hashBeforeMining, block.Hash);
+        Assert.NotEqual(0, block.Nonce);
+    }
 }

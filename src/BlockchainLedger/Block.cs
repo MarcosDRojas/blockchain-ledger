@@ -21,8 +21,13 @@ public class Block
     // no predecessor, so it uses "0" as a placeholder.
     public string PreviousHash { get; }
 
-    // SHA-256 hash of Index + Timestamp + Data + PreviousHash, computed once at construction time.
-    public string Hash { get; }
+    // The value MineBlock searches over to make Hash satisfy the difficulty
+    // target. Starts at 0 and only ever changes during mining.
+    public int Nonce { get; private set; }
+
+    // SHA-256 hash of Index + Timestamp + Data + PreviousHash + Nonce.
+    // Mutable via mining: MineBlock keeps recomputing this as Nonce changes.
+    public string Hash { get; private set; }
 
     public Block(int index, string data, string previousHash)
     {
@@ -30,15 +35,31 @@ public class Block
         Timestamp = DateTime.UtcNow;
         Data = data;
         PreviousHash = previousHash;
+        Nonce = 0;
         Hash = ComputeHash();
     }
 
     // Hashes the block's fields together, including the link to the previous
-    // block, so that swapping this block out for a different one is detectable.
+    // block and the current Nonce, so that swapping the block or its proof
+    // of work is detectable.
     private string ComputeHash()
     {
-        string rawData = $"{Index}{Timestamp:O}{Data}{PreviousHash}";
+        string rawData = $"{Index}{Timestamp:O}{Data}{PreviousHash}{Nonce}";
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawData));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    // Proof-of-work: repeatedly bump Nonce and rehash until Hash starts with
+    // `difficulty` leading zero hex digits. This is deliberately expensive —
+    // finding such a Nonce takes real, unavoidable computation (~16^difficulty
+    // tries on average), while anyone else can verify the result in one hash.
+    public void MineBlock(int difficulty)
+    {
+        string target = new string('0', difficulty);
+        while (!Hash.StartsWith(target))
+        {
+            Nonce++;
+            Hash = ComputeHash();
+        }
     }
 }
