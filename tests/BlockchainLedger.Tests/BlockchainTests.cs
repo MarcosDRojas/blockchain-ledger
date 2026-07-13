@@ -74,4 +74,81 @@ public class BlockchainTests
 
         Assert.False(blockchain.IsChainValid());
     }
+
+    [Fact]
+    public void ReplaceChainIfLonger_AdoptsALongerValidChain()
+    {
+        var shortChain = new Blockchain(TestDifficulty);
+
+        var longerChain = new Blockchain(TestDifficulty);
+        longerChain.AddBlock("first transaction");
+        longerChain.AddBlock("second transaction");
+
+        bool replaced = shortChain.ReplaceChainIfLonger(longerChain.Chain);
+
+        Assert.True(replaced);
+        Assert.Equal(longerChain.Chain.Count, shortChain.Chain.Count);
+        Assert.Equal(longerChain.Chain[^1].Hash, shortChain.Chain[^1].Hash);
+    }
+
+    [Fact]
+    public void ReplaceChainIfLonger_RejectsAChainThatIsNotLonger()
+    {
+        var node = new Blockchain(TestDifficulty);
+        node.AddBlock("first transaction");
+        var sameLengthChain = new List<Block> { node.Chain[0], node.Chain[1] };
+
+        bool replaced = node.ReplaceChainIfLonger(sameLengthChain);
+
+        Assert.False(replaced);
+        Assert.Equal(2, node.Chain.Count);
+    }
+
+    [Fact]
+    public void ReplaceChainIfLonger_RejectsALongerButInvalidChain()
+    {
+        var node = new Blockchain(TestDifficulty);
+
+        var invalidLongerChain = new List<Block>
+        {
+            node.Chain[0],
+            new Block(1, "unmined block", node.Chain[0].Hash),
+            new Block(2, "another unmined block", "wrong-previous-hash"),
+        };
+
+        bool replaced = node.ReplaceChainIfLonger(invalidLongerChain);
+
+        Assert.False(replaced);
+        Assert.Single(node.Chain);
+    }
+
+    [Fact]
+    public void TwoBlockchains_ShareTheSameDeterministicGenesisBlock()
+    {
+        var nodeA = new Blockchain(TestDifficulty);
+        var nodeB = new Blockchain(TestDifficulty);
+
+        Assert.Equal(nodeA.GenesisHash, nodeB.GenesisHash);
+        Assert.Equal(nodeA.Chain[0].Hash, nodeB.Chain[0].Hash);
+    }
+
+    [Fact]
+    public void ReplaceChainIfLonger_RejectsALongerChainWithADifferentGenesisBlock()
+    {
+        var node = new Blockchain(TestDifficulty);
+
+        // A fully self-consistent chain (honest hashes, proper mining,
+        // correct linking) that's longer than ours, but rooted in a
+        // completely different, fabricated genesis block.
+        var foreignGenesis = new Block(0, "A fabricated chain", "0");
+        foreignGenesis.MineBlock(TestDifficulty);
+        var foreignBlock1 = new Block(1, "fabricated transaction", foreignGenesis.Hash);
+        foreignBlock1.MineBlock(TestDifficulty);
+        var foreignChain = new List<Block> { foreignGenesis, foreignBlock1 };
+
+        bool replaced = node.ReplaceChainIfLonger(foreignChain);
+
+        Assert.False(replaced);
+        Assert.Single(node.Chain);
+    }
 }

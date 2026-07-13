@@ -14,18 +14,38 @@ public class Blockchain
     // accepted. Higher = exponentially more mining work per block.
     public int Difficulty { get; }
 
+    // Hash of the genesis block this node started from. Pinned at
+    // construction and never changed afterward — IsValidChain refuses any
+    // candidate chain whose block 0 doesn't match it, no matter how long or
+    // otherwise-valid that chain is. Without this, a peer could hand a node
+    // an entirely fabricated chain (different genesis, fake history) and,
+    // as long as it were longer, this node would replace its real history
+    // with it. Pinning limits a peer to only ever extending a chain that
+    // shares this node's actual origin.
+    public string GenesisHash { get; }
+
+    // Fixed rather than DateTime.UtcNow so every node mines the exact same
+    // genesis block from the exact same inputs — deterministic proof-of-work.
+    // That's what lets independently-started nodes recognize each other as
+    // being on the same chain in the first place. Real blockchains do the
+    // same thing by hard-coding their genesis block.
+    private static readonly DateTime GenesisTimestamp = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     public Blockchain(int difficulty = 4)
     {
         Difficulty = difficulty;
-        Chain.Add(CreateGenesisBlock());
+        Block genesis = CreateGenesisBlock();
+        GenesisHash = genesis.Hash;
+        Chain.Add(genesis);
     }
 
     // The first block has no predecessor, so it points to a placeholder hash.
-    // It's mined like any other block so IsChainValid can hold it to the
-    // same proof-of-work standard.
+    // Built via the "reconstruct as-is" constructor (not the mining one) so
+    // Timestamp can be fixed instead of DateTime.UtcNow, then mined like any
+    // other block so IsChainValid can hold it to the same proof-of-work standard.
     private Block CreateGenesisBlock()
     {
-        var genesis = new Block(0, "Genesis Block", "0");
+        var genesis = new Block(index: 0, timestamp: GenesisTimestamp, data: "Genesis Block", previousHash: "0", nonce: 0, hash: string.Empty);
         genesis.MineBlock(Difficulty);
         return genesis;
     }
@@ -40,25 +60,50 @@ public class Blockchain
         Chain.Add(newBlock);
     }
 
-    // A chain is valid only if every block both links to the real hash of
-    // its predecessor AND shows valid proof-of-work for its own hash.
-    public bool IsChainValid()
+    // A chain is valid only if it starts from this node's pinned genesis
+    // block, and every block from there has an honest, unforged hash, earns
+    // the required proof-of-work, and links to the real hash of its
+    // predecessor. Works on any candidate list, not just this instance's own
+    // Chain, so it can vet a chain received from a peer before adopting it.
+    public bool IsValidChain(IReadOnlyList<Block> candidateChain)
     {
-        string target = new string('0', Difficulty);
-
-        for (int i = 0; i < Chain.Count; i++)
+        if (candidateChain.Count == 0 || candidateChain[0].Hash != GenesisHash)
         {
-            if (!Chain[i].Hash.StartsWith(target))
+            return false;
+        }
+
+        for (int i = 0; i < candidateChain.Count; i++)
+        {
+            Block block = candidateChain[i];
+
+            if (!block.HasValidHash() || !block.SatisfiesDifficulty(Difficulty))
             {
                 return false;
             }
 
-            if (i > 0 && Chain[i].PreviousHash != Chain[i - 1].Hash)
+            if (i > 0 && block.PreviousHash != candidateChain[i - 1].Hash)
             {
                 return false;
             }
         }
 
+        return true;
+    }
+
+    public bool IsChainValid() => IsValidChain(Chain);
+
+    // The consensus rule this node follows when it disagrees with a peer:
+    // the longest chain that's still fully valid wins. Returns true if the
+    // candidate replaced this node's chain.
+    public bool ReplaceChainIfLonger(List<Block> candidateChain)
+    {
+        if (candidateChain.Count <= Chain.Count || !IsValidChain(candidateChain))
+        {
+            return false;
+        }
+
+        Chain.Clear();
+        Chain.AddRange(candidateChain);
         return true;
     }
 }

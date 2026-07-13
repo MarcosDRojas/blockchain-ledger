@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace BlockchainLedger;
 
@@ -29,6 +30,8 @@ public class Block
     // Mutable via mining: MineBlock keeps recomputing this as Nonce changes.
     public string Hash { get; private set; }
 
+    // Used locally when this node mines its own block: Timestamp/Nonce start
+    // fresh and Hash is computed from them (and then re-earned by MineBlock).
     public Block(int index, string data, string previousHash)
     {
         Index = index;
@@ -37,6 +40,21 @@ public class Block
         PreviousHash = previousHash;
         Nonce = 0;
         Hash = ComputeHash();
+    }
+
+    // Used to reconstruct a block that arrived from a peer over the network:
+    // every field, including the already-mined Hash and Nonce, is taken as-is
+    // instead of being recomputed. JsonConstructor tells System.Text.Json to
+    // use this overload (not the mining one above) when deserializing.
+    [JsonConstructor]
+    public Block(int index, DateTime timestamp, string data, string previousHash, int nonce, string hash)
+    {
+        Index = index;
+        Timestamp = timestamp;
+        Data = data;
+        PreviousHash = previousHash;
+        Nonce = nonce;
+        Hash = hash;
     }
 
     // Hashes the block's fields together, including the link to the previous
@@ -62,4 +80,15 @@ public class Block
             Hash = ComputeHash();
         }
     }
+
+    // Recomputes the hash from this block's current field values and checks
+    // it against the stored Hash. Pointless within a single process (Hash is
+    // always self-consistent here), but essential once a Block has crossed
+    // the network from another node: it proves the block wasn't forged or
+    // corrupted in transit.
+    public bool HasValidHash() => Hash == ComputeHash();
+
+    // Whether Hash actually earns the proof-of-work for the given difficulty,
+    // rather than a peer just claiming a hash that happens to look right.
+    public bool SatisfiesDifficulty(int difficulty) => Hash.StartsWith(new string('0', difficulty));
 }

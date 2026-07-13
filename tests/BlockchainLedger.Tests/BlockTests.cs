@@ -80,4 +80,40 @@ public class BlockTests
         Assert.NotEqual(hashBeforeMining, block.Hash);
         Assert.NotEqual(0, block.Nonce);
     }
+
+    [Fact]
+    public void HasValidHash_TrueForAnHonestlyMinedBlock()
+    {
+        var block = new Block(0, "Genesis Block", "0");
+        block.MineBlock(difficulty: 2);
+
+        Assert.True(block.HasValidHash());
+    }
+
+    [Fact]
+    public void HasValidHash_FalseWhenReconstructedWithAForgedHash()
+    {
+        // Simulates a block arriving over the network claiming a hash that
+        // doesn't actually match its own fields.
+        var forged = new Block(0, DateTime.UtcNow, "Genesis Block", "0", nonce: 0, hash: "not-a-real-hash");
+
+        Assert.False(forged.HasValidHash());
+    }
+
+    [Fact]
+    public void SatisfiesDifficulty_FalseWhenHashLacksLeadingZeros()
+    {
+        var block = new Block(0, "Genesis Block", "0");
+
+        Assert.False(block.SatisfiesDifficulty(difficulty: 2));
+    }
+
+    [Fact]
+    public void SatisfiesDifficulty_TrueAfterMiningToThatDifficulty()
+    {
+        var block = new Block(0, "Genesis Block", "0");
+        block.MineBlock(difficulty: 2);
+
+        Assert.True(block.SatisfiesDifficulty(difficulty: 2));
+    }
 }
