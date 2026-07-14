@@ -26,13 +26,18 @@ A from-scratch blockchain in C#, built one concept at a time: hashing → chaini
 
 **Genesis pinning (also Chunk 4).** Longest-chain consensus alone has a hole: a peer could hand a node an entirely fabricated chain — different genesis, fake history — and if it were longer, it'd win. `Blockchain.GenesisHash` is captured once and never changed; `IsValidChain` refuses any candidate chain whose first block doesn't match it. The genesis block itself is mined from **fixed** inputs (not `DateTime.UtcNow`) specifically so every node, run independently, mines the identical genesis block — the same trick real blockchains use by hard-coding theirs.
 
+**Interactive API (Swagger).** Every endpoint below is also explorable and callable from a browser via Swagger UI at `/swagger` — useful for poking at a running node without hand-writing curl commands.
+
+**Automated multi-node tests (Chunk 5, in progress).** Unit tests can't prove real networking works — they run in one process. `tests/BlockchainLedger.AutomationTests` uses [Testcontainers](https://testcontainers.com/) to build the real Docker image and run 2-3 actual node containers on an isolated Docker network per test, then drives them exactly like the manual demo below (register peers, mine, poll for propagation) to prove broadcast and consensus work between genuinely separate processes — not just in-memory objects.
+
 ## Project layout
 
 ```
 blockchain-ledger/
 ├── BlockchainLedger.sln
-├── src/BlockchainLedger/       # the node: Block, Blockchain, Node, HTTP API (Program.cs)
-└── tests/BlockchainLedger.Tests/  # unit tests (xUnit)
+├── src/BlockchainLedger/                  # the node: Block, Blockchain, Node, HTTP API (Program.cs), Dockerfile
+├── tests/BlockchainLedger.Tests/          # unit tests (xUnit)
+└── tests/BlockchainLedger.AutomationTests/  # multi-node integration tests (xUnit + Testcontainers + Docker)
 ```
 
 ## Running a single node
@@ -40,6 +45,8 @@ blockchain-ledger/
 ```
 dotnet run --project src/BlockchainLedger --urls http://localhost:5001
 ```
+
+Open `http://localhost:5001/swagger` for an interactive API explorer, or use curl:
 
 ```
 GET  /chain              # this node's chain: { length, valid, chain }
@@ -50,7 +57,7 @@ POST /blocks/receive       # a peer pushing a newly mined block
 POST /consensus/resolve    # manually trigger longest-valid-chain sync against all peers
 ```
 
-## Running a two-node demo
+## Running a two-node demo (locally)
 
 ```
 dotnet run --project src/BlockchainLedger --urls http://localhost:5001
@@ -64,10 +71,44 @@ curl -X POST http://localhost:5001/blocks/mine -H "Content-Type: application/jso
 curl http://localhost:5002/chain   # node 2 picked up node 1's block
 ```
 
+## Running a two-node demo (Docker)
+
+This is the more realistic version: two separate containers on their own Docker network, exactly what the automation tests in Chunk 5 do programmatically.
+
+```
+docker build -f src/BlockchainLedger/Dockerfile -t blockchain-ledger-node .
+docker network create blockchain-demo
+
+docker run -d --name node1 --network blockchain-demo --network-alias node1 -p 5001:8080 blockchain-ledger-node
+docker run -d --name node2 --network blockchain-demo --network-alias node2 -p 5002:8080 blockchain-ledger-node
+```
+
+Each `-p hostPort:8080` is only for *you* to reach that container from the host — including Swagger UI, in a browser:
+
+- node1: `http://localhost:5001/swagger`
+- node2: `http://localhost:5002/swagger`
+
+Containers reach each other by their `--network-alias`, not by that host port — so peer registration uses `node1`/`node2`, not `localhost`:
+
+```
+curl -X POST http://localhost:5001/peers/register -H "Content-Type: application/json" -d "{\"peerUrl\":\"http://node2:8080\"}"
+curl -X POST http://localhost:5002/peers/register -H "Content-Type: application/json" -d "{\"peerUrl\":\"http://node1:8080\"}"
+curl -X POST http://localhost:5001/blocks/mine -H "Content-Type: application/json" -d "{\"data\":\"Alice pays Bob 5 coins\"}"
+curl http://localhost:5002/chain   # node 2 picked up node 1's block via the Docker network
+```
+
+Clean up when done:
+
+```
+docker rm -f node1 node2
+docker network rm blockchain-demo
+```
+
 ## Tests
 
 ```
-dotnet test
+dotnet test tests/BlockchainLedger.Tests              # fast unit tests, no Docker required
+dotnet test tests/BlockchainLedger.AutomationTests     # multi-node integration tests — requires Docker running
 ```
 
 ## Progress
@@ -76,4 +117,5 @@ dotnet test
 - [x] Chunk 2 — link blocks into a chain (`PreviousHash`, `AddBlock`, `IsChainValid`)
 - [x] Chunk 3 — proof-of-work (mining difficulty, nonce)
 - [x] Chunk 4 — multi-node networking and consensus (peer registration, broadcast, longest-valid-chain, genesis pinning)
-- [ ] Chunk 5 — automated multi-node integration tests (Testcontainers + Docker)
+- [x] Swagger UI for interactively exploring/calling the API
+- [ ] Chunk 5 — automated multi-node integration tests (Testcontainers + Docker) — containerization, single-container smoke test, and multi-node consensus scenarios done; keeping this suite isolated from the fast unit-test run is still open

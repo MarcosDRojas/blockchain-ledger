@@ -11,7 +11,15 @@ builder.Services.AddSingleton(new Blockchain(difficulty: 4));
 builder.Services.AddSingleton<HttpClient>();
 builder.Services.AddSingleton<Node>();
 
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
 var app = builder.Build();
+
+// Enabled unconditionally (not just in Development) since this node is
+// meant to be poked at directly, including when running in Docker.
+app.UseSwagger();
+app.UseSwaggerUI();
 
 // Read-only view of this node's chain, plus enough info for a peer (or a
 // human with curl) to judge it: how long it is and whether it's valid.
